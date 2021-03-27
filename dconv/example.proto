@@ -1,15 +1,8 @@
-syntax="proto3";
-
+syntax = "proto3";
 
 message Meta {
-	int64 user_id = 1;
-	int64 item_id = 2;
-	int64 channel_id = 3;
+    int64 user_id = 1;
+    int64 item_id = 2;
+    int64 channel_id = 3;
 }
 
-
-message Example {
-	Meta meta = 1;
-	repeated int64 feature_id = 2;
-	repeated float label = 3;
-}
