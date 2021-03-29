@@ -1,24 +1,55 @@
 syntax = "proto3";
+package idl.data.dconv;
 
-enum ConvCode {
-    UNKNOWN_CONV_CODE = 0;
-    // 关注后24小时到72小时内该作者的阅读时长
-    STAY_AFTER_FOLLOW_24_72_HOUR_CONV_CODE = 1;
-    // 混推的小说同一本书24到72小时复看
-    NOVEL_BOOK_RETAIN_24_72_HOUR_CONV_CODE = 2;
-    // 版权视频同一个剧集24到72小时复看
-    LONG_VIDEO_ALBUM_RETAIN_24_72_HOUR_CONV_CODE = 3;
-    // ...省略，可参照Subjob定义，每个Subjob至少对应一个ConvCode
+// 转化信息，由埋点或审核平台、发文平台转化而来，也可以由样本转化来
+message Conv {
+    // 转化类型码
+    ConvCode conv_code = 1;
+    // 转化信息产出的时间
+    int64 conv_time = 2;
+    // 转化值（可选），比如停留的时长
+    float conv_value = 3;
+    // 转化的目标item_id
+    repeated int64 conv_item_id = 4;
+    // repeated Attr attr = 101;
 }
 
-// 转化信息
-message Conv {
-    ConvCode conv_code = 1;
-    int64 conv_time = 2;
-    float conv_value = 3;
-    repeated int64 conv_item_id = 4;
+// 内容类型
+enum ItemType {
+    UNKNOWN_ITEM_TYPE = 0;
+    ARTICLE_ITEM_TYPE = 1;
+    VIDEO_ITEM_TYPE = 2;
+    NOVEL_ITEM_TYPE = 3;
+    // ...更多ItemType省略，dconv可用于任何ItemType
+}
 
-    repeated Attr attr = 101;
+// 内容中可能包含的其他内容链接，比如影视拆条可以带原版视频的链接
+message LinkItem {
+    ItemType link_item_type = 1;
+    // 可选，标识链接位置
+    int64 link_position = 2;
+    // 链接的内容ID
+    int64 link_item_id = 3;
+    // 可选，某些场景会有链接文字内容
+    string link_text = 4;
+    // Attr attr = 101;
+}
+
+// 内容隶属的父内容，主要用于拼接一些更具泛化性的深度转化目标
+// 比如推荐小说章节，那么小说的书id就对应父内容，读者第二天返回同一本书的其他章节也算正例
+message ParentItem {
+    ItemType parent_item_type = 1;
+    int64 parent_item_id = 2;
+    // Attr attr = 101;
+}
+
+// 内容包括的子内容，比如问题体裁，一个问题，其内容会对应若干个回答，这些回答ID能提供一些信息
+message ChildrenItem {
+    ItemType children_item_type = 1;
+    repeated int64 children_item_id = 2;
+    // children_item往往会很多，k表示一个截断k个。截断前的排序一般是某种后验
+    int32 k = 3;
+    // Attr attr = 101;
 }
 
 
@@ -30,30 +61,36 @@ message Meta {
     int64 item_id = 2;
     // 频道ID，用于区分推荐位置，简单三域FFM特征之一
     int64 channel_id = 3;
-    // 请求ID，在推荐请求与埋点中都会出现，
-    //  可用于更精确的拼接样本，尤其是消重力度不强时
+    // 请求ID，在推荐请求与埋点中都会出现，可用于更精确的拼接样本，尤其是消重力度不强时
     string request_id = 4;
-    // 若干AB实验的分组号，逗号分隔
-    string ab_version = 5;
+    // 文章类型
+    ItemType item_type = 5;
     // 请求时间，约等于推荐时间
     int64 req_time = 6;
     // 用户发生点击的时间
     int64 click_time = 7;
     // 点击样本产出时间，与`click_time`有细微不同
     int64 ctr_generate_time = 8;
+    // 若干AB实验的分组号，逗号分隔
+    string ab_version = 9;
     // 转化，由dconv填充，阅读时长、评论、关注等短窗口可拼的转化已经在里边了
     //  下游训练器的预处理模块会基于训练脚本根据Conv确定训练Label
-    repeated Conv conv = 9;
+    repeated Conv conv = 10;
+    // 作者ID
+    int64 author_user_id = 11;
+    // 内容中可以点击的链接
+    repeated LinkItem link_item = 12;
+    // 内容所隶属的Item，可提供一些有用信息
+    repeated ParentItem parent_item = 13;
+    // 内容中所包含的Item，可提供一些有用的信息
+    repeated ChildrenItem children_item = 14;
 
     repeated Attr attr = 1001;
 
 }
 
-// 这里的embedding对于样本而言是不可训练的，比如其他更复杂模型产
-//  出的embedding（蒸馏），或是预训练的GE等。
-//  也可以复用这个结构存储Dense特征，虽然语义上
-//  的Dense特征在大规模点击率场景下Dense特征效果没有想象中的好
-// 
+// 这里的embedding对于样本而言是不可训练的，比如其他更复杂模型产出的embedding（蒸馏），或是预训练的GE等。
+// 也可以复用这个结构存储Dense特征，虽然语义上的Dense特征在大规模点击率场景下Dense特征效果没有想象中那么优秀
 message Embedding {
     // 与sparse_feature_id是同一个ID空间
     int64 embedding_feature_id = 1;
@@ -66,33 +103,66 @@ message Embedding {
 message Example {
     // 元信息，1)在拼接时可用于选择；2)在训练器中可用于定制label；3)与feature解耦
     Meta Meta = 1;
-    // 离散特征列表，特征的高16位表示特征的大类，比如，1号大类是用户id，
-    //  2号大类是内容id，15号大类是用户年龄分桶，29号大类是内容的关键词ID
-    //  630号大类是用户最近阅读的内容id，780号大类是内容历史点击率的分桶
+    // 离散特征列表，特征的高16位表示特征的大类，比如，1号大类是用户id，2号大类是内容id，15号大类是用户年龄分桶，
+    // 29号大类是内容的关键词ID, 630号大类是用户最近阅读的内容id，780号大类是内容历史点击率的分桶
     repeated int64 feature_id = 2;
-    // 预训练或其他联合使用其他模型Embedding，它存储在样本中的必要性：
-    //  防止特征穿越，比如流式训练模型产出的embedding给天极训练的模型使用
+    // 预训练或其他联合使用其他模型Embedding，它存储在样本中的必要性：防止特征穿越，比如流式训练模型产出的embedding
+    // 给天极训练的模型使用
     repeated Embedding embedding = 3;
-    // 在进入训练器前，label一般表示点击与否，
-    //  在训练器的预处理阶段，会将样本conv列表中的指定信息转化为label写在这里
+    // 在进入训练器前，label一般表示点击与否，在训练器的预处理阶段，会将样本conv列表中的指定信息转化为label写在这里
     repeated float label = 4;
+    // repeated Attr attr = 101;
+}
 
+enum ConvCode {
+    UNKNOWN_CONV_CODE = 0;
+    // 关注后24小时到72小时内该作者的阅读时长
+    STAY_AFTER_FOLLOW_24_72_HOUR_CONV_CODE = 1;
+    // 混推的小说同一本书24到72小时复看
+    NOVEL_BOOK_RETAIN_24_72_HOUR_CONV_CODE = 2;
+    // 版权视频同一个剧集24到72小时复看
+    LONG_VIDEO_ALBUM_RETAIN_24_72_HOUR_CONV_CODE = 3;
+    // ...省略，可参照Subjob定义，每个Subjob至少对应一个ConvCode
+}
 
+enum RawCode {
+    UNKNOWN_RAW_CODE = 0;
+    // 有关注行为的样本，服务于STAY_AFTER_FOLLOW_SUBJOB_CODE
+    RETAIN_AUTHOR_FOLLOW_RAW_CODE = 1;
+    // 有关注行为的样本，服务于RETAIN_AUTHOR_AFTER_FOLLOW_SUBJOB_CODE
+    RETAIN_BOOK_NOVEL_RAW_CODE = 2;
+    // ...更多RawCode省略，可参见Subjob，每个Subjob对应一个或多个RawCode
+}
+
+// 对Example的包装，记录一些
+message RawExample {
+    // 用于过滤及选择RawExample
+    RawCode raw_code = 1;
+    // 可训练样本
+    Example example = 2;
+    // 用于记录已上报的样本对应的Conv，用于消重；每个上报的RawExample可能会对应多个Conv
+    repeated Conv emited_conv = 3;
+    // 用于记录emited_conv的对应上报时间，辅助消重
+    repeated int64 emit_time = 4;
 }
 
 message Wrapper {
+    // 拼接key，由不同的Subjob定制
     string key = 1;
+    // 方便Debug
     int64 user_id = 2;
-    repeated Example example = 3;
+    // 每个key可能会对应多个RawExample
+    repeated RawExample raw_example = 3;
+    // 每个key会缓存多个Conv，每次触发产生后，会根据RawExample中的emited_conv与该conv字段来
+    // 共同决定是否emit或是否缓存；对一些极端的情况，Conv是有可能比Example早到的（上游Example一般需要5分钟的时间窗口）
     repeated Conv conv = 4;
 }
 
-
+// 每个Subjob需配置如下的信息，并在代码中实现过滤逻辑、key生成逻辑与消重逻辑
 message Subjob {
     // 拼接逻辑编号，dconv根据SubjobCode确定逻辑
     SubjobCode subjob_code = 1;
-    // Emit模式，有FAST_EMIT, WINDOW_EMIT, FAST_POS_WINDOW_EMIT，
-    // 还有一些定制的Mode
+    // Emit模式，有FAST_EMIT/WINDOW_EMIT/FAST_POS_WINDOW_EMIT，还有一些定制的Mode
     EmitMode emit_mode = 2;
     // 输出样本到哪个队列
     string output_kafka_cluster = 3;
@@ -100,24 +170,34 @@ message Subjob {
     // 用于缓存样本的redis
     string cache_redis_cluster = 5;
     string cache_redis_table = 6;
+    // 时长窗口列表
+    repeated int64 time_window = 7;
+    // 最小时长限制（小于该时长限制的转化会被丢弃）
+    repeated int64 min_time_window = 8;
+
 }
 
+// 样本上报模式
 enum EmitMode {
-    // 默认为fast-emit模式，当出现符合Subjob要求的上游样本后直接emit负例，
-    // 当出现符合Subjob要求的上游转化信息后直接emit正例
+    // 默认为fast-emit模式，当出现符合Subjob要求的上游样本后直接emit负例，当出现符合Subjob要求的上游转化信息后直接emit正例
     // 所emit的负例可能不准确，这需要通过训练器sample-bias来矫正
     FAST_EMIT = 0;
-    // 窗口模式，在指定时间内，只缓存转化信息，
-    // 需要等
+    // 窗口模式，在指定时间内，只缓存转化信息，在固定时间后发送口径准确的正负例
     WINDOW_EMIT = 1;
+    // 窗口模式的基础上，对于正例的Conv都是随到随发，负例则严格由时间窗口触发上报
     FAST_POS_WINDOW_EMIT = 2;
 }
 
 enum SubjobCode {
     // 空白SubjobCode会报错
     UNKNOWN_SUBJOB_CODE = 0;
+    // 关注后在一段时间后在同一作者上的阅读总时长
     STAY_AFTER_FOLLOW_SUBJOB_CODE = 1;
+    // 关注后在一段时间后是否会再次阅读同一作者的内容
     RETAIN_AUTHOR_AFTER_FOLLOW_SUBJOB_CODE = 2;
+    // 关注后在关注频道消费同一作者内容
+    RETAIN_FOLLOW_CHANNEL_AFTER_FOLLOW_SUBJOB_CODE = 3;
+
 }
 
 
