@@ -1,8 +1,128 @@
 syntax = "proto3";
 
-message Meta {
-    int64 user_id = 1;
-    int64 item_id = 2;
-    int64 channel_id = 3;
+enum ConvCode {
+    UNKNOWN_CONV_CODE = 0;
+    // 关注后24小时到72小时内该作者的阅读时长
+    STAY_AFTER_FOLLOW_24_72_HOUR_CONV_CODE = 1;
+    // 混推的小说同一本书24到72小时复看
+    NOVEL_BOOK_RETAIN_24_72_HOUR_CONV_CODE = 2;
+    // 版权视频同一个剧集24到72小时复看
+    LONG_VIDEO_ALBUM_RETAIN_24_72_HOUR_CONV_CODE = 3;
+    // ...省略，可参照Subjob定义，每个Subjob至少对应一个ConvCode
 }
 
+// 转化信息
+message Conv {
+    ConvCode conv_code = 1;
+    int64 conv_time = 2;
+    float conv_value = 3;
+    repeated int64 conv_item_id = 4;
+
+    repeated Attr attr = 101;
+}
+
+
+// Meta中内容用于选择样本或更改样本，并不能直接用于训练
+message Meta {
+    // 用户ID，简单三域FFM特征之一
+    int64 user_id = 1;
+    // 被推荐内容ID，简单三域FFM特征之一
+    int64 item_id = 2;
+    // 频道ID，用于区分推荐位置，简单三域FFM特征之一
+    int64 channel_id = 3;
+    // 请求ID，在推荐请求与埋点中都会出现，
+    //  可用于更精确的拼接样本，尤其是消重力度不强时
+    string request_id = 4;
+    // 若干AB实验的分组号，逗号分隔
+    string ab_version = 5;
+    // 请求时间，约等于推荐时间
+    int64 req_time = 6;
+    // 用户发生点击的时间
+    int64 click_time = 7;
+    // 点击样本产出时间，与`click_time`有细微不同
+    int64 ctr_generate_time = 8;
+    // 转化，由dconv填充，阅读时长、评论、关注等短窗口可拼的转化已经在里边了
+    //  下游训练器的预处理模块会基于训练脚本根据Conv确定训练Label
+    repeated Conv conv = 9;
+
+    repeated Attr attr = 1001;
+
+}
+
+// 这里的embedding对于样本而言是不可训练的，比如其他更复杂模型产
+//  出的embedding（蒸馏），或是预训练的GE等。
+//  也可以复用这个结构存储Dense特征，虽然语义上
+//  的Dense特征在大规模点击率场景下Dense特征效果没有想象中的好
+// 
+message Embedding {
+    // 与sparse_feature_id是同一个ID空间
+    int64 embedding_feature_id = 1;
+    // 长度就是embedding的长度
+    repeated float embedding_value = 2;
+    // repeated Attr attr = 101;
+}
+
+// 统一的样本定义，可直接输入给训练器
+message Example {
+    // 元信息，1)在拼接时可用于选择；2)在训练器中可用于定制label；3)与feature解耦
+    Meta Meta = 1;
+    // 离散特征列表，特征的高16位表示特征的大类，比如，1号大类是用户id，
+    //  2号大类是内容id，15号大类是用户年龄分桶，29号大类是内容的关键词ID
+    //  630号大类是用户最近阅读的内容id，780号大类是内容历史点击率的分桶
+    repeated int64 feature_id = 2;
+    // 预训练或其他联合使用其他模型Embedding，它存储在样本中的必要性：
+    //  防止特征穿越，比如流式训练模型产出的embedding给天极训练的模型使用
+    repeated Embedding embedding = 3;
+    // 在进入训练器前，label一般表示点击与否，
+    //  在训练器的预处理阶段，会将样本conv列表中的指定信息转化为label写在这里
+    repeated float label = 4;
+
+
+}
+
+message Wrapper {
+    string key = 1;
+    int64 user_id = 2;
+    repeated Example example = 3;
+    repeated Conv conv = 4;
+}
+
+
+message Subjob {
+    // 拼接逻辑编号，dconv根据SubjobCode确定逻辑
+    SubjobCode subjob_code = 1;
+    // Emit模式，有FAST_EMIT, WINDOW_EMIT, FAST_POS_WINDOW_EMIT，
+    // 还有一些定制的Mode
+    EmitMode emit_mode = 2;
+    // 输出样本到哪个队列
+    string output_kafka_cluster = 3;
+    string output_kafka_topic = 4;
+    // 用于缓存样本的redis
+    string cache_redis_cluster = 5;
+    string cache_redis_table = 6;
+}
+
+enum EmitMode {
+    // 默认为fast-emit模式，当出现符合Subjob要求的上游样本后直接emit负例，
+    // 当出现符合Subjob要求的上游转化信息后直接emit正例
+    // 所emit的负例可能不准确，这需要通过训练器sample-bias来矫正
+    FAST_EMIT = 0;
+    // 窗口模式，在指定时间内，只缓存转化信息，
+    // 需要等
+    WINDOW_EMIT = 1;
+    FAST_POS_WINDOW_EMIT = 2;
+}
+
+enum SubjobCode {
+    // 空白SubjobCode会报错
+    UNKNOWN_SUBJOB_CODE = 0;
+    STAY_AFTER_FOLLOW_SUBJOB_CODE = 1;
+    RETAIN_AUTHOR_AFTER_FOLLOW_SUBJOB_CODE = 2;
+}
+
+
+// 附加属性，按需填充
+message Attr {
+    string attr_key = 1;
+    string attr_value = 2;
+}
