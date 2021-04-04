@@ -146,6 +146,7 @@ message RawExample {
     repeated int64 emit_time = 4;
 }
 
+// 二进制化后作为value存在redis里，flink中每次操作都是更改Wrapper并塞回去的过程
 message Wrapper {
     // 拼接key，由不同的Subjob定制
     string key = 1;
@@ -192,11 +193,89 @@ enum SubjobCode {
     // 空白SubjobCode会报错
     UNKNOWN_SUBJOB_CODE = 0;
     // 关注后在一段时间后在同一作者上的阅读总时长
-    STAY_AFTER_FOLLOW_SUBJOB_CODE = 1;
+    STAY_DURATION_AFTER_FOLLOW_SUBJOB_CODE = 1;
     // 关注后在一段时间后是否会再次阅读同一作者的内容
     RETAIN_AUTHOR_AFTER_FOLLOW_SUBJOB_CODE = 2;
     // 关注后在关注频道消费同一作者内容
     RETAIN_FOLLOW_CHANNEL_AFTER_FOLLOW_SUBJOB_CODE = 3;
+    // 非小说app里第二天再次消费小说体裁（进阅读器）
+    NOVEL_REUSE_1DAY_SUBJOB_CODE = 4;
+    // 小说GID在24小时到72小时间的再阅读时长
+    NOVEL_READ_TIME_24H_72H_SUBJOB_CODE = 5;
+    // 小说加书架（必须在阅读一段时间之后）
+    NOVEL_ADD_BOOKSHELF_AFTER_DEEP_READ_SUBJOB_CODE = 6;
+    // 小说app下book_id留存，1天
+    NOVEL_APP_RETAIN_1DAY_SUBJOB_CODE = 7;
+    // 小说app下book_id留存，3天
+    NOVEL_APP_RETAIN_3DAY_SUBJOB_CODE = 8;
+    // 小说app下book_id留存，7天
+    NOVEL_APP_RETAIN_7DAY_SUBJOB_CODE = 9;
+    // 小说app下book_id在7天后统计的留存总天数（for回归）
+    NOVEL_APP_RETAIN_MAX_CONV_SUBJOB_CODE = 10;
+    // 小说app下book_id的多日留存
+    NOVEL_APP_RETAIN_MULTITASK_SUBJOB_CODE = 11;
+    // 电视剧第二天再播放同一个album_id
+    LVIDEO_REPLAY_1DAY_SUBJOB_CODE = 12;
+    // 电视剧同一album_id在7天内的总时长
+    LVIDEO_PLAY_TIME_7DAY_SUBJOB_CODE = 13;
+    // 电视剧在非推荐位的ablum_id留存情况（搜索、历史、收藏夹等自己去找原来看过的album_id）
+    LVIDEO_REPLAY_NOT_RECOMMENT_SUBJOB_CODE = 14;
+    // 电视剧非推荐位通过CrossJoin生成时长样本
+    LVIDEO_FAKE_STAY_PAGE_SUBJOB_CODE = 15;
+    // 普通视频非推荐位通过CrossJoin生成时长样本
+    VIDEO_FAKE_STAY_PAGE_SUBJOB_CODE = 16;
+    // 视频新用户第一刷的模糊留存归因
+    VIDEO_NEW_USER_FIRST_REQ_SUBJOB_CODE = 17;
+    // 付费转化fast-emit
+    PAY_CONV_SUBJOB_CODE = 18;
+    // 付费探索fast-emit
+    PAY_EXPLORE_SUBJOB_CODE = 19;
+    // 带窗口准确付费转化样本
+    PAY_CONV_WINDOW_SUBJOB_CODE = 20;
+    // 小说点击下一章
+    NOVEL_CLICK_NEXT_CHAPTER_SUBJOB_CODE = 21;
+    // 评论后回复
+    COMMENT_REPLY_SUBJOB_CODE =22;
+    // 评论后点赞
+    COMMENT_DIGG_SUBJOB_CODE = 23;
+    // 评论后被作者点赞（这个可能被作者Hack）
+    COMMENT_AUTHOR_DIGG_SUBJOB_CODE = 24;
+    // 评论指向，比如用户在评论里说文章有欺骗性
+    COMMENT_BAD_MOOD_SUBJOB_CODE = 25;
+    // 不良评论，该目标的目的是减少这类评论
+    COMMENT_PORN_OR_RUDE_SUBJOB_CODE = 26;
+    // 所有评论类目标的多目标数据流
+    COMMENT_MULTITASK_SUBJOB_CODE = 27;
+    // 问答作答
+    QUORA_DO_ANSWER_SUBJOB_CODE = 28;
+    // 搜索词多日后有对同一搜索词的重复点击
+    SUG_CLICK_HISTORY_SUBJOB_CODE = 29;
+    // 视频发文
+    VIDEO_DO_PUBLISH_SUBJOB_CODE = 30;
+    // 电商类同一店铺的重复消费
+    COMMODITY_SHOP_RETAIN_SUBJOB_CODE = 31;
+    // 小说话题3小时内的带书阅读时长
+    NOVEL_QUORA_BOOK_TIME_3H_SUBJOB_CODE = 32;
+    // 小说话题带书成功后的留存情况
+    NOVEL_QUORA_BOOK_RETAIN_1DAY_SUBJOB_CODE = 33;
+    // 电视剧影视拆条播放后再消费同一个电视剧的影视拆条
+    SLVIDEO_RETAIN_SLVIDEO_SUBJOB_CODE = 34;
+    // 电视剧影视拆条播放后的album留存
+    SLVIDEO_RETAIN_SUBJOB_CODE = 35;
+    // 小说独立App的非推荐位通过CrossJoin生成时长样本
+    NOVEL_APP_FAKE_STAY_PAGE_SUBJOB_CODE = 36;
+    // 搜索词在一段时间后搜索相似搜索词
+    SUG_DO_SEARCH_SIMILAR_SUBJOB_CODE = 37;
+    // 电视剧以角色、编剧、演员、导演等做key的3日后留存
+    LVIDEO_CHARACTOR_RETAIN_3DAY_SUBJOB_CODE = 38;
+    // 问答中3日后又留存同一个问题ID
+    QUORA_RETAIN_SAME_QUESTION_3DAY_SUBJOB_CODE = 39;
+    // 小视频卡片被点击后，内流所有的时长都算在第一个点击的video_id上
+    SHORT_VIDEO_CONSEQ_TIME_1DAY_SUBJOB_CODE = 40;
+    // 小程序体裁再次使用
+    SMALL_APP_REUSE_SUBJOB_CODE = 41;
+    // 信息流游戏play总时长归因
+    GAME_PLAY_TIME_3DAY_SUBJOB_CODE = 42;
 
 }
 
